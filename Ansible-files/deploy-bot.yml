@@ -1,0 +1,99 @@
+---
+- name: Bring up FocusBot
+  hosts: localhost
+  become: true
+  tasks:
+    - name: add apt key
+      apt_key:
+        url: https://deb.nodesource.com/gpgkey/nodesource.gpg.key
+
+    - name: Add nodejs LTS repos
+      apt_repository:
+        repo: "deb https://deb.nodesource.com/node_16.x focal main"
+        state: present
+        update_cache: yes
+
+    - name: Install node js
+      apt:
+        name: nodejs
+
+    - name: Create ssh directory
+      ansible.builtin.file:
+              path: /home/{{ user }}/.ssh
+              state: directory
+              mode: '0755'
+
+    - name: Generate SSH key "{{ SSH_KEY_NAME }}"
+      openssh_keypair:
+              path: "/home/{{ user }}/.ssh/{{SSH_KEY_NAME}}"
+              type: rsa
+              size: 4096
+              state: present
+              force: no
+              owner: "{{ user }}"
+
+    - name: deploy ssh_keys
+      uri:
+        url: https://github.ncsu.edu/api/v3/repos/csc510-s2022/CSC510-13/keys
+        method: POST
+        body_format: json
+        status_code: [200,201]
+        headers:
+                Authorization: "token {{lookup('env','GITHUBTOKEN')}}"
+        body:
+                "title": "{{SSH_KEY_NAME}}"
+                "key": "{{ lookup ('file','/home/{{ user }}/.ssh/{{ SSH_KEY_NAME}}.pub')}}"
+                "read_only": true
+
+    - name: clone github
+      git:
+        repo: git@github.ncsu.edu:csc510-s2022/CSC510-13.git
+        version: main
+        dest: /home/{{ user }}/{{PROJECT_DIRECTORY_NAME}}
+        clone: yes
+        update: yes
+        ssh_opts: "-i /home/{{user}}/.ssh/{{SSH_KEY_NAME}}"
+        accept_hostkey: yes
+      become: yes
+
+    - name: Install packages via npm
+      npm:
+        path: /home/{{ user }}/{{PROJECT_DIRECTORY_NAME}}/FocusBot
+
+    - name: Install forever package
+      npm:
+        name: forever
+        global: yes
+        state: latest
+
+
+    - name: add apt key
+      apt_key:
+        url: https://www.mongodb.org/static/pgp/server-4.4.asc
+
+    - name: Add repos for mongodb
+      apt_repository:
+        repo: "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/4.4 multiverse"
+        state: present
+        update_cache: yes
+
+    - name: Install mongodb
+      apt:
+        pkg:
+        - mongodb-org=4.4.13
+        - mongodb-org-server=4.4.13
+        - mongodb-org-shell=4.4.13
+        - mongodb-org-mongos=4.4.13
+        - mongodb-org-tools=4.4.13
+
+    - name: Start mongodb
+      service:
+        name: mongod
+        state: started
+
+    - name: Start Bot
+      command: forever start /home/{{ user }}/{{PROJECT_DIRECTORY_NAME}}/FocusBot/index.js
+      environment:
+          BOTTOKEN: "{{lookup('env','BOTTOKEN')}}"
+          MANAGERID: "{{lookup('env',' MANAGERID')}}"
+          CHANNELID: "{{lookup('env','CHANNELID')}}"
